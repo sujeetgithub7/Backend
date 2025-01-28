@@ -4,6 +4,26 @@ import {User} from '../models/user.model.js'
 import {uploadOnCloudinary} from '../utils/cloudinary.js'
 import { ApiResponse } from '../utils/ApiResponse.js'
 
+//method for access and refresh token (login user ka steps h usi ka method h baar baar use hoga isliye method)
+const generateAccessAndRefreshToken = async(userId) => {
+    try {
+        const user = await User.findById(userId)
+        const accessToken = user.generateAccessToken()
+        const refreshToken = user.generateRefreshToken()
+
+        user.refreshToken = refreshToken
+        await user.save({validateBeforeSave: false})//validateBeforeSave:false because=> //jab save karne jaoge to password and aur detail jo model me required h mangega but for token saving we don't want that
+        
+        return {accessToken, refreshToken}
+
+
+    } catch (error) {
+        throw new ApiError(500, "something went wrong while generating token")
+    }
+}
+
+
+//register User
 const registerUser = asyncHandler( async (req,res) => {
     //refer user model
     //get user deatils from frontend/postman
@@ -94,4 +114,108 @@ const registerUser = asyncHandler( async (req,res) => {
 
 })
 
-export {registerUser} 
+//login User
+const loginUser = asyncHandler( async (req,res) =>{
+    //req body -> data
+    //username or email
+    //find the user
+    //password check
+    //access and refresh token
+    //send cookie me token
+
+    const {email,username,password} = req.body
+    //console.log(email);
+
+    if (!username && !email) {//agar dono nhi h tab if block execute
+        throw new ApiError(400, "username or email is required")
+    }
+    
+    // Here is an alternative of above code based on logic discussed in video:
+    // if (!(username || email)) {
+    //     throw new ApiError(400, "username or email is required")
+        
+    // }
+
+    const user = await User.findOne({
+        $or: [{username}, {email}]
+    })
+
+    if (!user) {
+        throw new ApiError(404, "User does not exist")
+    }
+//  isPasswordCorrect is internal method so be careful
+//  not mongoose ka method so user(lowercase) wala jo aap define kiye h na ki User(capital wala use karo jo save h db me)
+   const isPasswordValid = await user.isPasswordCorrect(password)
+
+   if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid user credentials")
+    }
+
+    const {accessToken,refreshToken} = await
+     generateAccessAndRefreshToken(user._id)
+
+    //sent in cookies
+    const loggedInUser = await User.findOne(user._id).
+    select("-password -refreshToken")
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    }
+
+    return res
+    .status(200)
+    .cookie("accessToken", accessToken,options)
+    .cookie("refreshToken", refreshToken,options)
+    .json(
+        new ApiResponse(
+            200,
+            {
+                user: loggedInUser, accessToken, refreshToken
+            },
+            "User logged in successfully"
+        )
+    )
+
+})
+
+//logout user
+//cookies hatao httpOnly h server se hi manage and referesh token ko bhi hatao server se 
+const logoutUser = asyncHandler(async (req,res,next) => {
+    //ab is method me user kha se aayega
+    //logout karte time to user se email,username mangenge nhi wo kisi ka bhi de sakta h 
+    //use middleware => jaane se pahle milkar jaiyega 
+    //auth middleware me verifyJWT then user route me logout se pahle verifyJWT method call as a middleware
+    //verifyJWT method me req.user = user now use this here
+
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set: {
+                refreshToken : undefined
+            }
+        },
+        {
+            new: true
+        }
+    )
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    }
+
+    return res
+    .status(200)
+    .clearcookie("accessToken",options)
+    .clearcookie("refreshToken",options)
+    .json(new ApiResponse(200,{}, "User logged out"))
+})
+
+
+
+export {
+    registerUser,
+    loginUser,
+    logoutUser
+} 
