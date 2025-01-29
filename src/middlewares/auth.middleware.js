@@ -13,7 +13,7 @@ export const verifyJWT = asyncHandler( async(req, _ ,
             if(!token){
                 throw new ApiError(401,"unauthorized request")
             }
-    
+    //This means decodedToken contains the user information that was encoded in the JWT during login.
         const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET)
     
         const user = await User.findById(decodedToken?._id).
